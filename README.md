@@ -135,7 +135,7 @@ VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_key
 
 | Name | Contribution |
 |------|-------------|
-| **Gurjas Singh** | Full-stack development, ML pipeline, OCR integration |
+| **Gurjas Singh** |  ML pipeline, OCR integration |
 | **Bhumik Chopra** | Frontend development, UI/UX design, API integration |
 
 ---
