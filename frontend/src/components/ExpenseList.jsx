@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Calendar, DollarSign, Tag, Building, Trash2, RefreshCw } from 'lucide-react';
 import { formatDateInfo } from '../utils/dateUtils';
+import { apiFetch } from '../utils/api';
 
 export default function ExpensesList() {
   const [expenses, setExpenses] = useState([]);
@@ -11,7 +12,7 @@ export default function ExpensesList() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch('http://localhost:5000/api/expenses');
+      const response = await apiFetch('/api/expenses');
       const data = await response.json();
       
       if (data.success) {
@@ -33,7 +34,7 @@ export default function ExpensesList() {
 
   const deleteExpense = async (id) => {
     try {
-      const response = await fetch(`http://localhost:5000/api/expenses/${id}`, {
+      const response = await apiFetch(`/api/expenses/${id}`, {
         method: 'DELETE'
       });
       

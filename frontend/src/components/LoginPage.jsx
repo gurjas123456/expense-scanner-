@@ -46,15 +46,17 @@ export default function LoginPage({ theme, onToggleTheme, onLoginSuccess }) {
     setError("");
 
     try {
-      const response = await apiFetch("/api/auth/signup", {
-        method: "POST",
-        body: JSON.stringify({
-          name: signUpName,
-          email: signUpEmail,
-          dob: signUpDob,
-          password: signUpPassword,
-        }),
-      });
+      const response = await apiFetch("/api/auth/register", {
+         method: "POST",
+         body: JSON.stringify({
+           name: signUpName,
+           username: signUpName,   // ← added
+           email: signUpEmail,
+           dob: signUpDob,
+            password: signUpPassword,
+          }),
+});
+      
       const result = await response.json();
 
       if (!response.ok || !result.success) {
@@ -258,14 +260,27 @@ export default function LoginPage({ theme, onToggleTheme, onLoginSuccess }) {
 
   return (
     <div
-      className={`flex h-screen items-center justify-center overflow-hidden px-4 py-4 ${
+      className={`relative flex h-screen items-center justify-center overflow-hidden px-4 py-4 ${
         theme === "dark" ? "theme-dark" : "theme-light"
       }`}
+      style={{
+        backgroundImage: 'url("/images/image.png")',
+        backgroundPosition: "center",
+        backgroundRepeat: "no-repeat",
+        backgroundSize: "cover",
+      }}
     >
+      <div
+        className={`absolute inset-0 ${
+          theme === "dark" ? "bg-slate-950/70" : "bg-white/55"
+        }`}
+      />
       {theme === "dark" ? (
-        <BorderGlow {...darkModeGlowProps}>{loginCard}</BorderGlow>
+        <div className="relative z-10">
+          <BorderGlow {...darkModeGlowProps}>{loginCard}</BorderGlow>
+        </div>
       ) : (
-        loginCard
+        <div className="relative z-10">{loginCard}</div>
       )}
     </div>
   );

@@ -3,6 +3,7 @@ import { motion as Motion } from "framer-motion";
 import BorderGlow from "./BorderGlow";
 import { darkModeGlowProps } from "./borderGlowTheme";
 import { useTheme } from "./ThemeContext";
+import { apiFetch } from "../utils/api";
 
 const COLORS = ["#2563eb", "#059669", "#d97706", "#dc2626", "#7c3aed", "#0f766e"];
 
@@ -17,7 +18,7 @@ export default function PieChartCard() {
     setError("");
 
     try {
-      const response = await fetch("http://localhost:5000/api/expenses");
+      const response = await apiFetch("/api/expenses");
       const data = await response.json();
 
       if (!response.ok || !data.success) {

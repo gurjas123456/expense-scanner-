@@ -5,6 +5,7 @@ import BorderGlow from "./BorderGlow";
 import { darkModeGlowProps } from "./borderGlowTheme";
 import { useTheme } from "./ThemeContext";
 import { formatDateInfo } from '../utils/dateUtils';
+import { apiFetch } from "../utils/api";
 
 export default function ExpenseTable() {
   const { theme } = useTheme();
@@ -23,7 +24,7 @@ export default function ExpenseTable() {
       if (category && category !== 'All Categories') params.append('category', category);
       if (date) params.append('start_date', date);
       
-      const response = await fetch(`http://localhost:5000/api/expenses?${params}`);
+      const response = await apiFetch(`/api/expenses?${params}`);
       const data = await response.json();
       
       if (data.success) {

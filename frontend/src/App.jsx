@@ -38,7 +38,7 @@ export default function App() {
 
     const fetchSession = async () => {
       try {
-        const response = await apiFetch("/api/auth/session", {
+        const response = await apiFetch("/api/auth/me", {
           method: "GET",
           headers: {},
         });

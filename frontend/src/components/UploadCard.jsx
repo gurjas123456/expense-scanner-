@@ -5,6 +5,7 @@ import BorderGlow from "./BorderGlow";
 import { darkModeGlowProps } from "./borderGlowTheme";
 import { useTheme } from "./ThemeContext";
 import { getCurrentLocalDate, formatDisplayDate } from '../utils/dateUtils';
+import { API_BASE_URL, apiFetch } from "../utils/api";
 
 
 export default function UploadCard() {
@@ -55,15 +56,12 @@ export default function UploadCard() {
     try {
       // Create FormData to send file to backend
       const formData = new FormData();
-      formData.append(file.type === 'application/pdf' ? 'pdf' : 'image', file);
+      formData.append('file', file);
 
       // Call the ML backend API
-      const response = await fetch('http://localhost:5000/api/process-bill', {
+      const response = await apiFetch('/api/ocr/process-receipt', {
         method: 'POST',
-        body: formData,
-        headers: {
-          // Don't set Content-Type, let browser set it with boundary for FormData
-        }
+        body: formData
       });
 
       if (!response.ok) {
@@ -73,22 +71,19 @@ export default function UploadCard() {
       const result = await response.json();
 
       if (result.success) {
-        if (result.manual_entry_required) {
-          // Handle manual entry case
+          // Normalize Flask response fields to what the UI expects
           setExtractedData({
             ...result,
-            vendor: 'Enter vendor name',
-            amount: 0,
-            category: 'Select category',
-            date: getCurrentLocalDate(),
-            items: ['Manual entry required - Install Tesseract OCR for automatic extraction']
+            vendor: result.vendor || 'Unknown vendor',
+            amount: result.amount || 0,
+            total_amount: result.amount || 0,
+            category: result.category || 'Other',
+            date: result.date || getCurrentLocalDate(),
+            items: result.items || [],
+            extracted_text: result.raw_text || '',
+            currency: result.currency || 'INR',
           });
-          setError('⚠️ Tesseract OCR not installed. Please enter details manually or install Tesseract for automatic extraction.');
-        } else {
-          // Normal OCR extraction
-          setExtractedData(result);
           setError(null);
-        }
       } else {
         setError(result.error || 'Failed to process bill');
       }
@@ -157,11 +152,8 @@ export default function UploadCard() {
       };
       
       // Send to backend
-      const response = await fetch('http://localhost:5000/api/expenses', {
+      const response = await apiFetch('/api/expenses', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
         body: JSON.stringify(expenseData)
       });
 

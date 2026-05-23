@@ -4,6 +4,7 @@ import { Settings, Target, TrendingUp, AlertTriangle } from "lucide-react";
 import BorderGlow from "./BorderGlow";
 import { darkModeGlowProps } from "./borderGlowTheme";
 import { useTheme } from "./ThemeContext";
+import { apiFetch } from "../utils/api";
 
 export default function BudgetProgressCard() {
   const { theme } = useTheme();
@@ -19,7 +20,7 @@ export default function BudgetProgressCard() {
 
   async function fetchExpenses() {
     try {
-      const response = await fetch("http://localhost:5000/api/expenses");
+      const response = await apiFetch("/api/expenses");
       if (response.ok) {
         const data = await response.json();
         const currentMonth = new Date().toISOString().slice(0, 7);

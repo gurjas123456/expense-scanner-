@@ -16,6 +16,9 @@ from PIL import Image
 import io
 import base64
 import json
+import pickle
+import tempfile
+import importlib.util
 from collections import defaultdict
 from models import EnhancedExpenseClassifier
 import pdfplumber
@@ -29,13 +32,23 @@ if hasattr(sys.stderr, "reconfigure"):
 
 app = Flask(__name__)
 app.config['SECRET_KEY'] = os.environ.get('SMARTSPEND_SECRET_KEY', 'smartspend-dev-secret')
+FRONTEND_ORIGINS = [
+    'http://localhost:3000',
+    'http://127.0.0.1:3000',
+    'http://localhost:4173',
+    'http://127.0.0.1:4173',
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+]
+configured_origins = [
+    origin.strip()
+    for origin in os.environ.get('FRONTEND_ORIGINS', ','.join(FRONTEND_ORIGINS)).split(',')
+    if origin.strip()
+]
 CORS(
     app,
     supports_credentials=True,
-    origins=[
-        'http://localhost:5173',
-        'http://127.0.0.1:5173'
-    ]
+    origins=configured_origins
 )
 
 # In-memory storage for expenses (replace with database in production)
@@ -58,6 +71,7 @@ SEED_USER = {
 
 mongo_client = None
 users_collection = None
+ocr_service = None
 
 
 def serialize_user(user_doc):
@@ -137,6 +151,39 @@ def generate_username_from_email(email):
 
     return candidate
 
+
+def get_shared_models_dir():
+    backend_dir = os.path.dirname(__file__)
+    project_root = os.path.dirname(backend_dir)
+    return os.path.join(os.path.dirname(project_root), 'models')
+
+
+def get_ocr_service():
+    """Load the production OCR service from the shared models folder."""
+    global ocr_service
+
+    if ocr_service is not None:
+        return ocr_service
+
+    models_dir = get_shared_models_dir()
+    ocr_service_path = os.path.join(models_dir, 'ocr_service.py')
+    models_site_packages = os.path.join(models_dir, '.venv', 'Lib', 'site-packages')
+
+    if os.path.isdir(models_site_packages) and models_site_packages not in sys.path:
+        sys.path.insert(0, models_site_packages)
+
+    if not os.path.exists(ocr_service_path):
+        raise FileNotFoundError(f"OCR service not found at {ocr_service_path}")
+
+    spec = importlib.util.spec_from_file_location('shared_ocr_service', ocr_service_path)
+    if spec is None or spec.loader is None:
+        raise ImportError(f"Unable to load OCR service module from {ocr_service_path}")
+
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    ocr_service = module.OCRService(models_dir=models_dir, use_gpu=False)
+    return ocr_service
+
 # Configure Tesseract path (update this path based on your installation)
 # For Windows, try these common paths:
 import fitz  # PyMuPDF
@@ -169,18 +216,30 @@ if platform.system() == "Windows":
 
 class BillExtractor:
     def __init__(self):
+        self.expense_model = None
+        self.tfidf_vectorizer = None
+        self.label_encoder = None
+        self.feature_scaler = None
+        self.enhanced_features = False
+        self.model_directory = None
+        self.model_format = None
         # Load the trained expense categorization model
-        model_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Expense_model', 'models', 'expense_model.pkl')
-        tfidf_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Expense_model', 'models', 'tfidf_vectorizer.pkl')
-        scaler_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'Expense_model', 'models', 'feature_scaler.pkl')
+        model_dir = self._find_model_directory()
+        model_path = os.path.join(model_dir, 'expense_model.pkl') if model_dir else ''
+        tfidf_path = os.path.join(model_dir, 'tfidf_vectorizer.pkl') if model_dir else ''
+        scaler_path = os.path.join(model_dir, 'feature_scaler.pkl') if model_dir else ''
+        legacy_model_path = os.path.join(model_dir, 'model.pkl') if model_dir else ''
+        legacy_vectorizer_path = os.path.join(model_dir, 'vectorizer.pkl') if model_dir else ''
+        legacy_encoder_path = os.path.join(model_dir, 'encoder.pkl') if model_dir else ''
         
-        if os.path.exists(model_path):
+        if model_dir and os.path.exists(model_path):
             try:
                 # Suppress scikit-learn version warnings
                 import warnings
                 with warnings.catch_warnings():
                     warnings.filterwarnings("ignore", category=UserWarning)
                     self.expense_model = joblib.load(model_path)
+                    self.model_directory = model_dir
                     
                     # Try to load enhanced components
                     if os.path.exists(tfidf_path) and os.path.exists(scaler_path):
@@ -194,15 +253,68 @@ class BillExtractor:
                         self.enhanced_features = False
                         print("✅ Basic expense model loaded successfully!")
                         
+                self.model_format = 'enhanced'
             except Exception as e:
                 print(f"⚠️ Warning: Could not load expense model: {e}")
                 print("The model might need to be retrained with current scikit-learn version")
                 self.expense_model = None
                 self.enhanced_features = False
+        elif (
+            model_dir
+            and os.path.exists(legacy_model_path)
+            and os.path.exists(legacy_vectorizer_path)
+            and os.path.exists(legacy_encoder_path)
+        ):
+            try:
+                with open(legacy_model_path, 'rb') as file_obj:
+                    self.expense_model = pickle.load(file_obj)
+                with open(legacy_vectorizer_path, 'rb') as file_obj:
+                    self.tfidf_vectorizer = pickle.load(file_obj)
+                with open(legacy_encoder_path, 'rb') as file_obj:
+                    self.label_encoder = pickle.load(file_obj)
+                self.model_directory = model_dir
+                self.model_format = 'legacy_text'
+                print("Loaded legacy text classifier successfully")
+            except Exception as e:
+                print(f"Warning: Could not load legacy text classifier: {e}")
+                self.expense_model = None
+                self.tfidf_vectorizer = None
+                self.label_encoder = None
         else:
             self.expense_model = None
             self.enhanced_features = False
-            print("Warning: Expense model not found at", model_path)
+            print("Warning: Expense model files were not found in any configured location")
+
+    def _find_model_directory(self):
+        backend_dir = os.path.dirname(__file__)
+        project_root = os.path.dirname(backend_dir)
+        configured_dir = os.environ.get('EXPENSE_MODEL_DIR')
+
+        candidate_dirs = [
+            configured_dir,
+            os.path.join(project_root, 'Expense_model', 'models'),
+            os.path.join(project_root, 'expense_model', 'models'),
+            os.path.join(project_root, 'models'),
+            os.path.join(os.path.dirname(project_root), 'models'),
+            os.path.join(backend_dir, 'Expense_model', 'models'),
+            os.path.join(backend_dir, 'models'),
+        ]
+
+        for candidate in candidate_dirs:
+            if not candidate:
+                continue
+            if (
+                os.path.exists(os.path.join(candidate, 'expense_model.pkl'))
+                or os.path.exists(os.path.join(candidate, 'model.pkl'))
+            ):
+                print(f"âœ… Using expense model directory: {candidate}")
+                return candidate
+
+        print("Searched model directories:")
+        for candidate in candidate_dirs:
+            if candidate:
+                print(f" - {candidate}")
+        return None
     
     def preprocess_image(self, image):
         """Preprocess image for better OCR results"""
@@ -1019,6 +1131,16 @@ class BillExtractor:
             return rule_based_category
         
         try:
+            if self.model_format == 'legacy_text' and self.tfidf_vectorizer is not None and self.label_encoder is not None:
+                print(f"Using legacy text model for '{description[:50]}...'")
+                description_clean = self._clean_legacy_model_text(description)
+                text_features = self.tfidf_vectorizer.transform([description_clean])
+                encoded_prediction = self.expense_model.predict(text_features)[0]
+                ml_category = self.label_encoder.inverse_transform([encoded_prediction])[0]
+                mapped_category = self._normalize_legacy_category(ml_category)
+                print(f"Legacy ML prediction: '{ml_category}' -> '{mapped_category}'")
+                return mapped_category
+
             if self.enhanced_features and self.tfidf_vectorizer and self.feature_scaler:
                 # Enhanced prediction with TF-IDF and additional features
                 print(f"🤖 Using enhanced ML model for '{description[:50]}...'")
@@ -1066,6 +1188,31 @@ class BillExtractor:
         except Exception as e:
             print(f"Error in ML categorization: {e}")
             return rule_based_category
+
+    def _clean_legacy_model_text(self, text):
+        text = str(text).lower()
+        text = re.sub(r"\d+", "", text)
+        text = re.sub(r"rs", "", text)
+        text = re.sub(r"[^a-z\s]", " ", text)
+        text = re.sub(r"\s+", " ", text)
+        return text.strip()
+
+    def _normalize_legacy_category(self, category):
+        category_map = {
+            'food': 'Food & Dining',
+            'food & dining': 'Food & Dining',
+            'healthcare': 'Healthcare',
+            'transport': 'Transportation',
+            'transportation': 'Transportation',
+            'bills': 'Bills & Utilities',
+            'bills & utilities': 'Bills & Utilities',
+            'shopping': 'Shopping',
+            'entertainment': 'Entertainment',
+            'others': 'Other',
+            'miscellaneous': 'Other',
+            'other': 'Other',
+        }
+        return category_map.get(str(category).strip().lower(), str(category).strip())
     
     def _fallback_categorization(self, description, amount):
         """Enhanced rule-based categorization with comprehensive keyword matching"""
@@ -1671,6 +1818,248 @@ class BillExtractor:
 # Initialize the bill extractor
 bill_extractor = BillExtractor()
 
+
+def process_image_with_production_ocr(image_file, filename):
+    """Process image receipts with the shared production OCR service."""
+    service = get_ocr_service()
+
+    suffix = os.path.splitext(filename or 'receipt.jpg')[1] or '.jpg'
+    temp_path = None
+
+    try:
+        with tempfile.NamedTemporaryFile(delete=False, suffix=suffix) as temp_file:
+            image_file.save(temp_file)
+            temp_path = temp_file.name
+
+        service_result = service.process_receipt(temp_path)
+        raw_text = service_result.get('raw_text', '') or ''
+        corrected_amount, corrected_amounts = correct_ocr_amount_artifacts(
+            raw_text,
+            service_result.get('amount', 0),
+            service_result.get('all_amounts', []),
+        )
+        vendor = bill_extractor.extract_vendor_info(raw_text)
+        bill_date = bill_extractor.extract_dates(raw_text)
+        items = bill_extractor.extract_items(raw_text)
+        normalized_category = bill_extractor._normalize_legacy_category(service_result.get('category', 'Other'))
+        refined_category = refine_production_category(raw_text, normalized_category)
+
+        return {
+            'success': True,
+            'extracted_text': raw_text,
+            'vendor': vendor,
+            'amount': corrected_amount,
+            'total_amount': corrected_amount,
+            'currency': 'INR',
+            'date': bill_date,
+            'items': items,
+            'category': refined_category,
+            'confidence': 0.9,
+            'source': 'production_ocr',
+            'ocr_backend': service_result.get('ocr_backend'),
+            'all_amounts': corrected_amounts,
+            'cleaned_text': service_result.get('cleaned_text', ''),
+        }
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.remove(temp_path)
+            except OSError:
+                pass
+
+
+def _parse_amount_token(token):
+    token = str(token).strip().strip(",.")
+    if not token:
+        return None
+
+    if "." in token:
+        normalized = token.replace(",", "")
+    elif token.count(",") >= 2:
+        parts = [part for part in token.split(",") if part]
+        if not parts:
+            return None
+        if len(parts[-1]) <= 2:
+            normalized = "".join(parts[:-1]) + "." + parts[-1]
+        else:
+            normalized = "".join(parts)
+    elif "," in token:
+        left, right = token.split(",", 1)
+        if len(right) in {1, 2}:
+            normalized = left + "." + right
+        elif len(right) == 3:
+            normalized = left + right
+        else:
+            normalized = left + right
+    else:
+        normalized = token
+
+    try:
+        value = float(normalized)
+    except ValueError:
+        return None
+
+    if 0 < value <= 100000:
+        return value
+    return None
+
+
+def extract_strong_total_candidates(raw_text):
+    """Extract high-confidence total amounts from OCR text."""
+    text = raw_text or ''
+    scored_candidates = []
+    strong_label_pattern = r'(bill\s+total|grand\s+total|net\s+total|invoice\s+total|amount\s+due|\btotal\b|tota\]|\botal\b)'
+
+    for match in re.finditer(strong_label_pattern, text, re.IGNORECASE):
+        start, end = match.span()
+        prefix = text[max(0, start - 18):start].lower()
+        if any(skip in prefix for skip in ['sub', 'cgst', 'sgst', 'igst', 'vat', 'tax', 'change', 'cash', 'payment']):
+            continue
+        after_window = text[end:end + 24]
+        before_window = text[max(0, start - 18):start]
+        label_text = match.group(0).lower()
+        after_lower = after_window.lower()
+
+        if label_text == 'total' and ('item' in after_lower[:16] or 'qty' in after_lower[:16]):
+            continue
+
+        after_tokens = re.findall(r'\d[\d,]*(?:\.\d{1,2})?', after_window)
+        before_tokens = re.findall(r'\d[\d,]*(?:\.\d{1,2})?', before_window)
+
+        if after_tokens:
+            parsed_value = _parse_amount_token(after_tokens[0])
+            if parsed_value is not None:
+                scored_candidates.append((5, round(parsed_value, 2)))
+
+        if before_tokens:
+            parsed_value = _parse_amount_token(before_tokens[-1])
+            if parsed_value is not None:
+                scored_candidates.append((4, round(parsed_value, 2)))
+
+    ordered = []
+    seen = set()
+    for _, value in sorted(scored_candidates, key=lambda item: (-item[0], item[1])):
+        if value <= 0 or value in seen:
+            continue
+        seen.add(value)
+        ordered.append(value)
+    return ordered
+
+
+def extract_currency_artifact_total_candidates(raw_text):
+    """Fix OCR cases where a currency symbol is merged into the total amount."""
+    text = raw_text or ''
+    candidates = []
+    total_line_pattern = r'.{0,80}(bill\s+total|grand\s+total|net\s+total|invoice\s+total|amount\s+due|\btotal\b).{0,80}'
+
+    for match in re.finditer(total_line_pattern, text, re.IGNORECASE):
+        line = match.group(0)
+        for token in re.findall(r'\d[\d,]*(?:\s*\.\s*\d{1,2})?', line):
+            compact = re.sub(r'\s+', '', token)
+            parsed_value = _parse_amount_token(compact)
+            compact_digits = compact.replace(',', '')
+            if not compact_digits or compact_digits[0] not in {'7', '8', '5'}:
+                continue
+
+            stripped_token = compact[1:]
+            stripped_value = _parse_amount_token(stripped_token)
+            if stripped_value is None:
+                continue
+
+            if parsed_value is not None and parsed_value > stripped_value * 5:
+                candidates.append(stripped_value)
+                print(
+                    f"Corrected leading currency artifact on total line: {parsed_value} -> {stripped_value} from '{line}'",
+                    flush=True,
+                )
+
+    return sorted({round(value, 2) for value in candidates if value > 0}, reverse=True)
+
+
+def correct_ocr_amount_artifacts(raw_text, detected_amount, all_amounts):
+    """Fix common OCR cases where the rupee symbol is merged into the amount."""
+    base_amount = float(detected_amount or 0)
+    normalized_amounts = sorted({float(value) for value in (all_amounts or []) if value}, reverse=True)
+    candidate_amounts = []
+
+    if base_amount > 0:
+        candidate_amounts.append(base_amount)
+    candidate_amounts.extend(normalized_amounts)
+
+    total_lines = [
+        line.strip()
+        for line in (raw_text or '').splitlines()
+        if re.search(r'(grand\s*total|net\s*total|total\s*amount|\btotal\b|amount\s*due)', line, re.IGNORECASE)
+    ]
+
+    for line in total_lines:
+        for token in re.findall(r'\d[\d,]*(?:\.\d{1,2})?', line):
+            parsed_value = _parse_amount_token(token)
+            if parsed_value is not None:
+                candidate_amounts.append(parsed_value)
+
+            # OCR sometimes reads the rupee symbol as a leading 7: 7470.40 -> 470.40
+            if token.startswith('7') and len(token.replace(',', '')) >= 4:
+                stripped_value = _parse_amount_token(token[1:])
+                if stripped_value is None:
+                    continue
+                if stripped_value >= 10 and parsed_value and parsed_value > stripped_value * 5:
+                    print(f"Corrected OCR currency artifact: {parsed_value} -> {stripped_value} from line '{line}'")
+                    candidate_amounts.append(stripped_value)
+
+    strong_total_candidates = extract_strong_total_candidates(raw_text)
+    artifact_total_candidates = extract_currency_artifact_total_candidates(raw_text)
+
+    if strong_total_candidates:
+        merged_totals = list(strong_total_candidates)
+        if artifact_total_candidates and merged_totals[0] > artifact_total_candidates[0] * 5:
+            merged_totals = [artifact_total_candidates[0], *merged_totals]
+    else:
+        merged_totals = list(artifact_total_candidates)
+
+    if merged_totals:
+        strongest_total = merged_totals[0]
+        print(
+            f"Strong total-context candidates: {strong_total_candidates}; artifact candidates: {artifact_total_candidates}",
+            flush=True,
+        )
+        if strongest_total not in candidate_amounts:
+            candidate_amounts.append(strongest_total)
+        corrected_amount = strongest_total
+    else:
+        corrected_amount = base_amount
+
+    candidate_amounts = sorted({round(value, 2) for value in candidate_amounts if value > 0}, reverse=True)
+
+    if corrected_amount not in candidate_amounts and corrected_amount > 0:
+        candidate_amounts.append(corrected_amount)
+        candidate_amounts = sorted({round(value, 2) for value in candidate_amounts if value > 0}, reverse=True)
+
+    print(
+        f"OCR amount selection: detected={base_amount}, corrected={corrected_amount}, "
+        f"strong_candidates={strong_total_candidates[:5]}, artifact_candidates={artifact_total_candidates[:5]}, candidates={candidate_amounts[:10]}"
+        , flush=True
+    )
+    return round(corrected_amount, 2), candidate_amounts
+
+
+def refine_production_category(raw_text, category):
+    text = (raw_text or '').lower()
+
+    if any(keyword in text for keyword in ['dominos', "domino's", 'pizza', 'burger', 'mojito', 'risotto', 'restaurant']):
+        return 'Food & Dining'
+
+    if any(keyword in text for keyword in ['pharmacy', 'medicine', 'clinic', 'veterinary', 'doctor', 'hospital']):
+        return 'Healthcare'
+
+    if any(keyword in text for keyword in ['trader joe', 'grocery', 'supermarket']):
+        return 'Groceries'
+
+    if any(keyword in text for keyword in ['walmart', 'superstore', 't-shirt', 'push pins']):
+        return 'Shopping'
+
+    return category
+
 @app.route('/api/auth/session', methods=['GET'])
 def auth_session():
     """Return the currently authenticated user session."""
@@ -1812,6 +2201,8 @@ def logout():
 def process_bill():
     """API endpoint to process uploaded bill image or PDF"""
     try:
+        json_data = request.get_json(silent=True) or {}
+
         # Check for PDF file
         if 'pdf' in request.files:
             file = request.files['pdf']
@@ -1829,21 +2220,18 @@ def process_bill():
             return jsonify(result)
         
         # Check for image file
-        elif 'image' in request.files or 'image_data' in request.json:
+        elif 'image' in request.files or 'image_data' in json_data:
             if 'image' in request.files:
                 # Handle file upload
                 file = request.files['image']
-                image = Image.open(file.stream)
-                image_array = np.array(image)
                 filename = file.filename
+                result = process_image_with_production_ocr(file, filename)
             else:
                 # Handle base64 image data
-                image_data = request.json['image_data']
+                image_data = json_data['image_data']
                 image_array = image_data
                 filename = 'uploaded_image'
-            
-            # Process the bill image
-            result = bill_extractor.process_bill(image_array)
+                result = bill_extractor.process_bill(image_array)
             result['file_type'] = 'image'
             result['filename'] = filename
             
@@ -1859,7 +2247,7 @@ def process_bill():
 def categorize_expense():
     """API endpoint to categorize an expense"""
     try:
-        data = request.json
+        data = request.get_json(silent=True) or {}
         description = data.get('description', '')
         amount = data.get('amount', 0)
         
@@ -1881,7 +2269,7 @@ def expenses():
     try:
         if request.method == 'POST':
             # Add new expense
-            data = request.json
+            data = request.get_json(silent=True) or {}
             
             # Validate required fields
             required_fields = ['vendor', 'amount', 'category', 'date']
@@ -2061,6 +2449,7 @@ def health_check():
     return jsonify({
         'status': 'healthy', 
         'model_loaded': bill_extractor.expense_model is not None,
+        'model_directory': bill_extractor.model_directory,
         'expenses_count': len(expenses_db)
     })
 
@@ -2093,4 +2482,10 @@ if __name__ == '__main__':
     print("🚀 Starting SmartSpend ML Backend...")
     print("📊 Backend URL: http://localhost:5000")
     print("🤖 ML Model: " + ("✅ Loaded" if bill_extractor.expense_model else "❌ Not Found"))
-    app.run(debug=True, host='0.0.0.0', port=5000)
+    debug_enabled = os.environ.get('FLASK_DEBUG', '0') == '1'
+    app.run(
+        debug=debug_enabled,
+        use_reloader=False,
+        host='0.0.0.0',
+        port=5000
+    )

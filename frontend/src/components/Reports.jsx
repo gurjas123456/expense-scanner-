@@ -2,6 +2,7 @@ import React, { useState, useEffect } from "react";
 import BorderGlow from "./BorderGlow";
 import { darkModeGlowProps } from "./borderGlowTheme";
 import { useTheme } from "./ThemeContext";
+import { apiFetch } from "../utils/api";
 
 export default function Reports() {
   const { theme } = useTheme();
@@ -34,7 +35,7 @@ export default function Reports() {
   const fetchExpenses = async () => {
     setLoading(true);
     try {
-      const response = await fetch("http://localhost:5000/api/expenses");
+      const response = await apiFetch("/api/expenses");
       if (response.ok) {
         const data = await response.json();
         setExpenses(data.expenses || []);
