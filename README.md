@@ -1,115 +1,145 @@
-💸 AI Smart Expense Scanner & Budget Coach
-Scan receipts. Auto-categorize. Chat with your finances.
+# 💸 AI Smart Expense Scanner & Budget Coach
 
-🎯 What is this?
-A production-ready full-stack web app that turns a photo of any receipt into structured expense data — automatically. No manual entry, no spreadsheets.
-Upload a receipt → OCR extracts the text → ML model categorizes it → Groq AI lets you chat with your spending data in plain English.
+### Scan receipts. Auto-categorize. Chat with your finances — all in one place.
 
-✨ Features
-FeatureDescription📸 Receipt OCRUpload any receipt image — EasyOCR extracts all text🏷️ Auto-categorizationsklearn ML model classifies into 6 expense categories💬 AI Budget ChatAsk "What did I spend most on this month?" — powered by Groq LLaMA 3📊 Visual DashboardPie charts, bar graphs, monthly breakdowns🔐 AuthClerk-based sign up / sign in with session management☁️ Cloud StorageAll expenses stored in MongoDB Atlas🚀 DeployableOne-click deploy on Render via render.yaml
+![Python](https://img.shields.io/badge/Python-3.10+-blue?style=flat-square)
+![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square)
+![Flask](https://img.shields.io/badge/Flask-3.x-black?style=flat-square)
+![MongoDB](https://img.shields.io/badge/MongoDB-Atlas-green?style=flat-square)
+![Groq](https://img.shields.io/badge/Groq-LLaMA3-red?style=flat-square)
+![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)
 
-🗂️ Project Structure
+> **Gurjas Singh & Bhumik Chopra** — B.Tech CSE, Dronacharya College of Engineering, Gurugram University (2023–2027)
+
+---
+
+## 🎯 About The Project
+
+Managing expenses manually is painful. This app solves that.
+
+Take a photo of any receipt — the system reads it using OCR, extracts the total amount and date, classifies it into a spending category using a trained ML model, and stores it in the cloud. You can then open the AI chat and ask questions like *"How much did I spend on food this month?"* or *"What is my top expense category?"* and get instant answers.
+
+Built as a college project but production-ready — deployed on Render with a React frontend, Flask backend, MongoDB Atlas database, and Groq-powered AI chat.
+
+---
+
+## ✨ Features
+
+- 📸 **Receipt OCR** — Upload JPG, PNG, BMP, or PDF. EasyOCR extracts all text automatically with OpenCV preprocessing for better accuracy.
+- 🏷️ **Auto-categorization** — A trained scikit-learn model (TF-IDF + LogisticRegression) classifies each expense into one of 6 categories instantly.
+- 💬 **AI Budget Coach** — Groq LLaMA 3.3 70B powers a chat interface. Ask anything about your spending in plain English.
+- 📊 **Visual Dashboard** — Donut charts, bar graphs, and monthly breakdowns built with Recharts.
+- 🔐 **Secure Auth** — Clerk handles sign up, sign in, and session management.
+- ☁️ **Cloud Storage** — All expense records stored and synced via MongoDB Atlas.
+- 📷 **Webcam Support** — Capture receipts directly from webcam without uploading a file.
+- 🚀 **Production Ready** — One-click deploy on Render via render.yaml.
+
+---
+
+## 🗂️ Project Structure
+
 expense-scanner/
 ├── frontend/                   # React 19 + Vite + Clerk
 │   ├── src/
-│   │   ├── components/         # Dashboard, Charts, ExpenseTable, Chat
+│   │   ├── components/         # Dashboard, Charts, ExpenseTable, ChatBot
 │   │   └── utils/api.js        # Axios API layer
 │   └── vite.config.js
-│
 ├── backend/                    # Flask REST API
 │   ├── app.py                  # Main server — routes, OCR, Groq chat
 │   ├── models.py               # MongoDB data models
 │   └── requirements.txt
-│
 ├── ocr_module/                 # Standalone ML pipeline
 │   ├── src/
 │   │   ├── production.py       # OCR + amount/date extraction
 │   │   └── model.py            # Model training code
-│   └── models/                 # Saved .pkl files
+│   └── models/
 │       ├── model.pkl
 │       ├── vectorizer.pkl
 │       └── encoder.pkl
-│
-├── assets/                     # Screenshots
-│   ├── pic_1.jpeg
-│   ├── pic_2.jpeg
-│   └── pic_3.jpeg
-│
-├── render.yaml                 # Render deployment config
+├── render.yaml
 └── .gitignore
 
-🛠️ Tech Stack
-Frontend    →  React 19, Vite, Clerk Auth, Recharts
-Backend     →  Flask, Python 3.10, PyMongo
-AI / Chat   →  Groq API (LLaMA 3.3 70B)
-OCR         →  EasyOCR, OpenCV, NumPy
-ML Model    →  scikit-learn (TF-IDF + LogisticRegression)
-Database    →  MongoDB Atlas
-Auth        →  Clerk
-Deploy      →  Render (backend as Web Service, frontend as Static Site)
+---
 
-⚙️ Local Setup
-Prerequisites
+## 🛠️ Tech Stack
 
-Python 3.10+
-Node.js 20+
-MongoDB Atlas URI
-Groq API key — free at console.groq.com
-Clerk account — free at clerk.com
+| Layer | Technology |
+|-------|------------|
+| Frontend | React 19, Vite, Clerk Auth, Recharts |
+| Backend | Flask, Python 3.10, PyMongo |
+| AI Chat | Groq API — LLaMA 3.3 70B |
+| OCR | EasyOCR, OpenCV, NumPy |
+| ML Model | scikit-learn (TF-IDF + LogisticRegression) |
+| Database | MongoDB Atlas |
+| Auth | Clerk |
+| Deployment | Render |
 
-1. Clone
-bashgit clone https://github.com/gurjas123456/expense-scanner-.git
+---
+
+## 🧠 How the ML Pipeline Works
+Receipt Image
+│
+▼
+EasyOCR + OpenCV preprocessing
+│
+├──► TF-IDF Vectorizer ──► LogisticRegression ──► Category
+│
+├──► Regex + Priority rules ──► Total Amount (₹)
+│
+└──► Pattern matching ──► Date (YYYY-MM-DD)
+
+**Categories:** Food & Dining · Healthcare · Shopping · Transport · Entertainment · Bills & Utilities
+
+---
+
+## ⚙️ Local Setup
+
+### 1. Clone
+git clone https://github.com/gurjas123456/expense-scanner-.git
 cd expense-scanner-
-2. Backend
-bashcd backend
+
+### 2. Backend
+cd backend
 python -m venv venv
-venv\Scripts\activate        # Windows
+venv\Scripts\activate
 pip install -r requirements.txt
+python app.py
+
 Create backend/.env:
-envMONGODB_URI=your_mongodb_connection_string
+MONGODB_URI=your_mongodb_connection_string
 MONGODB_DB_NAME=expense_db
 OPENAI_API_KEY=gsk_your_groq_key
-bashpython app.py
-# Running on http://localhost:5000
-3. Frontend
-bashcd frontend
+
+### 3. Frontend
+cd frontend
 npm install
+npm run dev
+
 Create frontend/.env:
-envVITE_API_BASE_URL=http://localhost:5000
+VITE_API_BASE_URL=http://localhost:5000
 VITE_CLERK_PUBLISHABLE_KEY=pk_test_your_clerk_key
-bashnpm run dev
-# Running on http://localhost:5173
 
-☁️ Deploy on Render
-Backend → Render Web Service
+---
 
-Root: backend/
-Build: pip install -r requirements.txt
-Start: gunicorn app:app
+## ☁️ Deploy on Render
 
-Frontend → Render Static Site
+**Backend — Web Service**
+- Root: `backend` · Build: `pip install -r requirements.txt` · Start: `gunicorn app:app`
 
-Root: frontend/
-Build: npm install && npm run build
-Publish: dist/
+**Frontend — Static Site**
+- Root: `frontend` · Build: `npm install && npm run build` · Publish: `dist`
 
+---
 
-🧠 How the ML Pipeline Works
-Receipt Image
-     │
-     ▼
-EasyOCR + OpenCV preprocessing
-     │
-     ├──► TF-IDF Vectorizer ──► LogisticRegression ──► Category
-     │
-     ├──► Regex + Priority rules ──► Total Amount (₹)
-     │
-     └──► Pattern matching ──► Date (YYYY-MM-DD)
-Categories: Food & Dining · Healthcare · Shopping · Transport · Entertainment · Bills & Utilities
+## 👨‍💻 Authors
 
-👨‍💻 Authors
-NameRoleGurjas SinghFull-stack dev, ML pipeline, OCR integrationBhumik ChopraFrontend, UI/UX, API integration
-B.Tech Computer Science — Dronacharya College of Engineering, Gurugram University (2022–2026)
+| Name | Contribution |
+|------|-------------|
+| **Gurjas Singh** | Full-stack development, ML pipeline, OCR integration |
+| **Bhumik Chopra** | Frontend development, UI/UX design, API integration |
 
-📄 License
+---
+
+## 📄 License
+
 MIT — free to use, fork, and build on.
